@@ -15,14 +15,16 @@ Get-Process MusicWidget -ErrorAction SilentlyContinue | Where-Object {
 Copy-Item -LiteralPath $source -Destination $installedExe -Force
 
 $shell = New-Object -ComObject WScript.Shell
-foreach ($link in @($startupLink, $startMenuLink, $desktopLink)) {
+foreach ($link in @($startMenuLink, $desktopLink)) {
     $shortcut = $shell.CreateShortcut($link)
     $shortcut.TargetPath = $installedExe
-    $shortcut.Arguments = if ($link -eq $startupLink) { '--tray' } else { '' }
+    $shortcut.Arguments = ''
     $shortcut.WorkingDirectory = $installDir
     $shortcut.Description = 'Виджет Яндекс Музыки: обложка, время, управление и настройки в трее'
     $shortcut.Save()
 }
+if (Test-Path -LiteralPath $startupLink) { Remove-Item -LiteralPath $startupLink }
+Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name YandexMusicWidget -Value ('"' + $installedExe + '"')
 
 Start-Process -FilePath $installedExe -WindowStyle Hidden
 
@@ -40,7 +42,7 @@ for ($attempt = 0; $attempt -lt 20; $attempt++) {
 }
 [pscustomobject]@{
     InstalledExe = $installedExe
-    StartupLink = $startupLink
+    AutoStart = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run\YandexMusicWidget'
     StartMenuLink = $startMenuLink
     DesktopLink = $desktopLink
 }

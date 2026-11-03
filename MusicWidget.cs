@@ -4,6 +4,7 @@ using System.Linq;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using Microsoft.Win32;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
@@ -40,6 +41,7 @@ static class Program {
         if (args.Contains("--self-test")) { Tests.Run(); return; }
         if (args.Contains("--probe-volume")) { var v=AudioVolume.Get();File.WriteAllText(Path.Combine(Data,"volume-probe.txt"),"Yandex session volume="+(v.HasValue?v.Value.ToString("F3")+" set-current="+AudioVolume.Set(v.Value):"unavailable")); return; }
         if (args.Contains("--probe-media")) {var manager=Media.Wait(GlobalSystemMediaTransportControlsSessionManager.RequestAsync()).GetAwaiter().GetResult();var s=manager.GetSessions().FirstOrDefault(x=>Media.IsYandex(x.SourceAppUserModelId));if(s!=null){var p=s.GetPlaybackInfo();File.WriteAllText(Path.Combine(Data,"media-probe.txt"),"Repeat="+p.AutoRepeatMode+" Shuffle="+p.IsShuffleActive);}return;}
+        if(!VerifyUi&&!Inspect&&!args.Contains("--recover")&&InstallPortable())return;
         bool created; single = new Mutex(true, "Local\\YandexMusicPaletteWidget", out created);
         if (!created) {
             if(TrayStart||VerifyUi){single.Dispose();return;}
@@ -52,11 +54,26 @@ static class Program {
         }
         ShowRequest=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\YandexMusicPaletteWidget.Show");
         Interlocked.Exchange(ref LastPulse,DateTime.UtcNow.Ticks);
-        Task.Run(()=>{while(true){Thread.Sleep(5000);try{var statusPath=Path.Combine(Data,"status.json");bool pulseFresh=DateTime.UtcNow.Ticks-Interlocked.Read(ref LastPulse)<TimeSpan.FromSeconds(60).Ticks;bool statusFresh=File.Exists(statusPath)&&DateTime.UtcNow-File.GetLastWriteTimeUtc(statusPath)<TimeSpan.FromSeconds(60);if(pulseFresh&&statusFresh)continue;var path=Process.GetCurrentProcess().MainModule.FileName;Process.Start(new ProcessStartInfo(path,"--recover --tray"){UseShellExecute=false,WorkingDirectory=Path.GetDirectoryName(path)});Process.GetCurrentProcess().Kill();}catch(Exception e){Log(e);}}});
+        Task.Run(()=>{while(true){Thread.Sleep(5000);try{var statusPath=Path.Combine(Data,"status.json");bool pulseFresh=DateTime.UtcNow.Ticks-Interlocked.Read(ref LastPulse)<TimeSpan.FromSeconds(60).Ticks;bool statusFresh=File.Exists(statusPath)&&DateTime.UtcNow-File.GetLastWriteTimeUtc(statusPath)<TimeSpan.FromSeconds(60);if(pulseFresh&&statusFresh)continue;var path=Process.GetCurrentProcess().MainModule.FileName;Process.Start(new ProcessStartInfo(path,"--recover"){UseShellExecute=false,WorkingDirectory=Path.GetDirectoryName(path)});Process.GetCurrentProcess().Kill();}catch(Exception e){Log(e);}}});
         var app = new Application{ShutdownMode=ShutdownMode.OnExplicitShutdown};
         app.DispatcherUnhandledException += (s,e) => { Log(e.Exception); e.Handled = true; };
         try { app.Run(new Widget()); } catch (Exception e) { Log(e); }
         ShowRequest.Dispose();single.ReleaseMutex(); single.Dispose();
+    }
+    static bool InstallPortable(){
+        var current=Process.GetCurrentProcess().MainModule.FileName;
+        var directory=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Programs","YandexMusicWidget");
+        var installed=Path.Combine(directory,"MusicWidget.exe");
+        if(!string.Equals(current,installed,StringComparison.OrdinalIgnoreCase)){
+            foreach(var old in Process.GetProcessesByName("MusicWidget"))try{if(old.Id!=Process.GetCurrentProcess().Id){old.Kill();old.WaitForExit(3000);}}catch(Exception e){Log(e);}
+            Directory.CreateDirectory(directory);
+            File.Copy(current,installed,true);
+        }
+        Registry.SetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run","YandexMusicWidget","\""+installed+"\"");
+        var obsolete=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup),"Яндекс Музыка — виджет.lnk");
+        if(File.Exists(obsolete))File.Delete(obsolete);
+        if(string.Equals(current,installed,StringComparison.OrdinalIgnoreCase))return false;
+        Process.Start(new ProcessStartInfo(installed){UseShellExecute=false,WorkingDirectory=directory});return true;
     }
     internal static void Log(Exception e) {
         try { var p=Path.Combine(Data,"errors.log"); if(File.Exists(p)&&new FileInfo(p).Length>262144) File.WriteAllText(p,""); File.AppendAllText(p,DateTime.Now.ToString("s")+" "+e+Environment.NewLine); } catch {}

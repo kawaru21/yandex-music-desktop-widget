@@ -41,7 +41,7 @@ static class Program {
         if (args.Contains("--self-test")) { Tests.Run(); return; }
         if (args.Contains("--probe-volume")) { var v=AudioVolume.Get();File.WriteAllText(Path.Combine(Data,"volume-probe.txt"),"Yandex session volume="+(v.HasValue?v.Value.ToString("F3")+" set-current="+AudioVolume.Set(v.Value):"unavailable")); return; }
         if (args.Contains("--probe-media")) {var manager=Media.Wait(GlobalSystemMediaTransportControlsSessionManager.RequestAsync()).GetAwaiter().GetResult();var s=manager.GetSessions().FirstOrDefault(x=>Media.IsYandex(x.SourceAppUserModelId));if(s!=null){var p=s.GetPlaybackInfo();File.WriteAllText(Path.Combine(Data,"media-probe.txt"),"Repeat="+p.AutoRepeatMode+" Shuffle="+p.IsShuffleActive);}return;}
-        if(!VerifyUi&&!Inspect&&!args.Contains("--recover")&&InstallPortable())return;
+        if(!VerifyUi&&!Inspect&&!args.Contains("--recover"))try{if(InstallPortable())return;}catch(Exception e){Log(e);MessageBox.Show("Не удалось установить виджет: "+e.Message,"Яндекс Музыка — виджет",MessageBoxButton.OK,MessageBoxImage.Error);return;}
         bool created; single = new Mutex(true, "Local\\YandexMusicPaletteWidget", out created);
         if (!created) {
             if(TrayStart||VerifyUi){single.Dispose();return;}
@@ -57,7 +57,7 @@ static class Program {
         Task.Run(()=>{while(true){Thread.Sleep(5000);try{var statusPath=Path.Combine(Data,"status.json");bool pulseFresh=DateTime.UtcNow.Ticks-Interlocked.Read(ref LastPulse)<TimeSpan.FromSeconds(60).Ticks;bool statusFresh=File.Exists(statusPath)&&DateTime.UtcNow-File.GetLastWriteTimeUtc(statusPath)<TimeSpan.FromSeconds(60);if(pulseFresh&&statusFresh)continue;var path=Process.GetCurrentProcess().MainModule.FileName;Process.Start(new ProcessStartInfo(path,"--recover"){UseShellExecute=false,WorkingDirectory=Path.GetDirectoryName(path)});Process.GetCurrentProcess().Kill();}catch(Exception e){Log(e);}}});
         var app = new Application{ShutdownMode=ShutdownMode.OnExplicitShutdown};
         app.DispatcherUnhandledException += (s,e) => { Log(e.Exception); e.Handled = true; };
-        try { app.Run(new Widget()); } catch (Exception e) { Log(e); }
+        try { app.Run(new Widget()); } catch (Exception e) { Log(e);MessageBox.Show("Не удалось открыть виджет: "+e.Message,"Яндекс Музыка — виджет",MessageBoxButton.OK,MessageBoxImage.Error); }
         ShowRequest.Dispose();single.ReleaseMutex(); single.Dispose();
     }
     static bool InstallPortable(){
@@ -215,12 +215,12 @@ class Widget : Window {
 
     internal Widget() {
         Title="Яндекс Музыка — виджет";Width=400;Height=224;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;
-        AllowsTransparency=true;Background=Brushes.Transparent;ShowInTaskbar=Program.Inspect;ShowActivated=Program.Inspect;FontFamily=new FontFamily("Segoe UI");
+        AllowsTransparency=true;Background=Brushes.Transparent;ShowInTaskbar=Program.Inspect;ShowActivated=!Program.TrayStart;FontFamily=new FontFamily("Segoe UI");
         settings=LoadSettings();Width=400*ScaleValue();Height=224*ScaleValue(); Left=SystemParameters.WorkArea.Right-Width-28;Top=SystemParameters.WorkArea.Bottom-Height-28;
         Build();
         Application.Current.SessionEnding+=(s,e)=>exitRequested=true;
         SourceInitialized+=(s,e)=> {handle=new WindowInteropHelper(this).Handle;EnforceTrayWindow();};
-        Loaded+=async(s,e)=> { if(initialized)return;initialized=true;ApplyLayer(); SetupTray();if(Program.TrayStart)HideWidget(); poll=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(650)};poll.Tick+=async(a,b)=>await Refresh();poll.Start();clock=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(200)};clock.Tick+=(a,b)=>{Interlocked.Exchange(ref Program.LastPulse,DateTime.UtcNow.Ticks);if(Program.ShowRequest.WaitOne(0))ShowWidget();Tick();};clock.Start(); await Refresh();if(Program.VerifyUi)await VerifyUi(); };
+        Loaded+=async(s,e)=> { if(initialized)return;initialized=true;ApplyLayer(); SetupTray();if(Program.TrayStart)HideWidget();else Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle,new Action(ShowWidget)); poll=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(650)};poll.Tick+=async(a,b)=>await Refresh();poll.Start();clock=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(200)};clock.Tick+=(a,b)=>{Interlocked.Exchange(ref Program.LastPulse,DateTime.UtcNow.Ticks);if(Program.ShowRequest.WaitOne(0))ShowWidget();Tick();};clock.Start(); await Refresh();if(Program.VerifyUi)await VerifyUi(); };
         Closing+=(s,e)=>{if(!exitRequested){e.Cancel=true;HideWidget();}};
         Closed+=(s,e)=> {closed=true;if(poll!=null)poll.Stop();if(clock!=null)clock.Stop();Unsubscribe();SaveSettings();if(tray!=null){var icon=tray.Icon;tray.Dispose();if(icon!=null)icon.Dispose();}};
         MouseLeftButtonDown+=(s,e)=> {Native.POINT p;Native.GetCursorPos(out p);Native.RECT r;Native.GetWindowRect(handle,out r);dragX=p.X-r.Left;dragY=p.Y-r.Top;dragging=true;CaptureMouse();};

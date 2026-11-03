@@ -1,0 +1,9 @@
+*.exe
+*.pdb
+*.log
+*.png
+*.user
+.vs/
+Probe.cs
+robloxx/
+

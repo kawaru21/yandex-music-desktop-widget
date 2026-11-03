@@ -44,8 +44,8 @@ static class Program {
         if (!created) {
             if(TrayStart||VerifyUi){single.Dispose();return;}
             // A manual launch must work even if the old UI thread cannot receive the show signal.
-            var path=Process.GetCurrentProcess().MainModule.FileName;
-            foreach(var old in Process.GetProcessesByName("MusicWidget"))try{if(old.Id!=Process.GetCurrentProcess().Id&&string.Equals(old.MainModule.FileName,path,StringComparison.OrdinalIgnoreCase)){old.Kill();old.WaitForExit(3000);}}catch(Exception e){Log(e);}
+            var currentId=Process.GetCurrentProcess().Id;
+            foreach(var old in Process.GetProcessesByName("MusicWidget"))try{if(old.Id!=currentId){old.Kill();old.WaitForExit(3000);}}catch(Exception e){Log(e);}
             single.Dispose();
             for(int attempt=0;attempt<20;attempt++){Thread.Sleep(150);single=new Mutex(true,"Local\\YandexMusicPaletteWidget",out created);if(created)break;single.Dispose();}
             if(!created)return;

@@ -101,6 +101,7 @@ static class Media {
     }
 }
 class Settings {
+    public int LayoutVersion {get;set;}
     public double X {get;set;}
     public double Y {get;set;}
     public bool HasPosition {get;set;}
@@ -382,20 +383,20 @@ class Widget : Window {
         if(DateTime.UtcNow-lastDiagnostic>TimeSpan.FromSeconds(2)) {
             lastDiagnostic=DateTime.UtcNow;
             try{Native.RECT rect;Native.GetWindowRect(handle,out rect);File.WriteAllText(Path.Combine(Program.Data,"status.json"),json.Serialize(new{title=title.Text,artist=artist.Text,playing=playing,position=position,duration=duration,artwork=art.Child==null,palette=living.ColorsUsed.Select(c=>c.ToString()).ToArray(),animated=living.Animate,frames=living.FrameCount,accent=accent.Color.ToString(),tray=tray!=null&&tray.Visible,taskbar=ShowInTaskbar,extendedStyle=Native.GetWindowLong(handle,-20),desktop=!settings.OnTop,parent=parent.ToInt64(),visible=Native.IsWindowVisible(handle),x=rect.Left,y=rect.Top,width=rect.Right-rect.Left,height=rect.Bottom-rect.Top,updated=DateTime.UtcNow.ToString("o")}));}catch{}
-            if(IsVisible&&!settings.OnTop&&(parent==IntPtr.Zero||!Native.IsWindow(parent)))ApplyLayer();
         }
     }
     async Task Command(string command,long ticks=0) {
         if(session==null)return;
         try {IAsyncOperation<bool> op=command=="previous"?session.TrySkipPreviousAsync():command=="next"?session.TrySkipNextAsync():command=="seek"?session.TryChangePlaybackPositionAsync(ticks):session.TryTogglePlayPauseAsync();await Media.Wait(op);metadataDirty=true;await Refresh();}catch(Exception e){Program.Log(e);}
     }
-    Settings LoadSettings() {try{return json.Deserialize<Settings>(File.ReadAllText(config))??new Settings();}catch{return new Settings();}}
+    Settings LoadSettings() {Settings value;try{value=json.Deserialize<Settings>(File.ReadAllText(config))??new Settings();}catch{value=new Settings();}if(value.LayoutVersion<2){value.OnTop=true;value.LayoutVersion=2;}return value;}
     void SavePosition(){Native.RECT r;if(handle!=IntPtr.Zero&&Native.GetWindowRect(handle,out r)){settings.X=r.Left;settings.Y=r.Top;settings.HasPosition=true;}}
     void SaveSettings(){try{SavePosition();File.WriteAllText(config,json.Serialize(settings));}catch(Exception e){Program.Log(e);}}
     void ApplyLayer() {
         if(handle==IntPtr.Zero)return;
-        if(settings.OnTop){Native.SetParent(handle,IntPtr.Zero);Native.SetWindowLong(handle,-16,(Native.GetWindowLong(handle,-16)&~0x40000000)|unchecked((int)0x80000000));parent=IntPtr.Zero;Topmost=true;}
-        else {Topmost=false;parent=Native.Desktop();if(parent!=IntPtr.Zero){Native.SetWindowLong(handle,-16,(Native.GetWindowLong(handle,-16)&~unchecked((int)0x80000000))|0x40000000);Native.SetParent(handle,parent);}}
+        Native.SetParent(handle,IntPtr.Zero);
+        Native.SetWindowLong(handle,-16,(Native.GetWindowLong(handle,-16)&~0x40000000)|unchecked((int)0x80000000));
+        parent=IntPtr.Zero;Topmost=settings.OnTop;
         Native.RECT rect;Native.GetWindowRect(handle,out rect);var area=System.Windows.Forms.Screen.PrimaryScreen.WorkingArea;
         Place(settings.HasPosition?settings.X:area.Right-(rect.Right-rect.Left)-28,settings.HasPosition?settings.Y:area.Bottom-(rect.Bottom-rect.Top)-28);KeepOnScreen();
         EnforceTrayWindow();
@@ -429,7 +430,7 @@ class Widget : Window {
             ((System.Windows.Forms.ToolStripMenuItem)((System.Windows.Forms.ToolStripMenuItem)prefs.DropDownItems[3]).DropDownItems[2]).PerformClick();await Task.Delay(400);check(Math.Abs(Width-500)<.01&&Math.Abs(Height-280)<.01,"Tray menu changes widget size");
             ((System.Windows.Forms.ToolStripMenuItem)((System.Windows.Forms.ToolStripMenuItem)prefs.DropDownItems[3]).DropDownItems[0]).PerformClick();await Task.Delay(400);var compact=Snapshot("widget-compact.png");check(Math.Abs(Width-320)<.01&&compact[(90*320+300)*4+3]>0,"Compact view keeps the right side visible");
             HideWidget();Program.ShowRequest.Set();await Task.Delay(600);check(IsVisible,"Repeated launch signal reopens hidden widget");
-            settings.OnTop=false;ApplyLayer();await Task.Delay(300);check(parent!=IntPtr.Zero&&Native.IsWindowVisible(handle),"Desktop mode attaches successfully");HideWidget();await Task.Delay(2400);check(!Native.IsWindowVisible(handle),"Desktop mode stays hidden until requested");ShowWidget();
+            settings.OnTop=false;ApplyLayer();await Task.Delay(300);check(parent==IntPtr.Zero&&Native.IsWindowVisible(handle),"Normal window mode remains visible without desktop parenting");HideWidget();await Task.Delay(2400);check(!Native.IsWindowVisible(handle),"Normal window mode stays hidden until requested");ShowWidget();
         } catch(Exception e) {results.Add("ERROR: "+e);Program.Log(e);}
         finally {settings.OnTop=onTop;living.Animate=motion;settings.AnimateBackground=motion;SetSpeed(oldSpeed);SetScale(oldScale);ApplyLayer();SaveSettings();File.WriteAllLines(Path.Combine(Program.Data,"ui-verification.txt"),results);Quit();}
     }
